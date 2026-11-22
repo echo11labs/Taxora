@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { isReviewer } from "@/lib/reviewer-auth";
-import { getTaxRepository } from "@/lib/tax-repository";
+import {
+  getSupabaseServerConfig,
+  getTaxRepository,
+} from "@/lib/tax-repository";
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,11 +39,36 @@ export async function GET(req: NextRequest) {
         ),
     );
 
-    return NextResponse.json({
-      status: "success",
-      count: documents.length,
-      documents,
-    });
+    const visibleDocuments = status
+      ? documents
+      : documents
+          .filter((document) => document.status === "verified")
+          .map((document) => ({
+            id: document.id,
+            title: document.title,
+            documentType: document.documentType,
+            issuingAuthority: document.issuingAuthority,
+            fiscalYear: document.fiscalYear,
+            fileUrl: document.fileUrl,
+            fileName: document.fileName,
+            mimeType: document.mimeType,
+            summary: /^Official .+ uploaded via CA Knowledge Hub:/i.test(
+              document.summary ?? "",
+            )
+              ? undefined
+              : document.summary,
+            status: document.status,
+          }));
+
+    return NextResponse.json(
+      {
+        status: "success",
+        count: visibleDocuments.length,
+        managedCatalog: Boolean(getSupabaseServerConfig()),
+        documents: visibleDocuments,
+      },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (err: unknown) {
     console.error("[resources] list failed:", err);
     return NextResponse.json(

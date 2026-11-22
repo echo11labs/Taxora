@@ -37,6 +37,16 @@ import {
   type ResponseLanguage,
   shuffleArray,
 } from "@/lib/mock-tax-chat";
+import {
+  isFinanceLegislation,
+  usePublishedDocuments,
+  type PublishedDocument,
+} from "@/lib/published-documents";
+import {
+  RESEARCH_SECTIONS,
+  type ResearchSourceItem,
+} from "@/lib/research-catalog";
+import { TAX_LIBRARY_DOCUMENTS } from "@/lib/tax-law-catalog";
 import type { TaxQAEntry } from "@/lib/tax-repository";
 import { generateId } from "@/lib/utils";
 import ChatAttachments, { type ChatAttachment } from "./chat-attachments";
@@ -57,208 +67,58 @@ const assistant = {
   icon: TaxAssistantIcon,
 };
 
-interface ResearchSourceItem {
-  title: string;
-  shortTitle: string;
-  subTitle: string;
-  category: string;
-  authority: string;
-  tag: string;
-  provisions: string;
-  status?: string;
-  sourceUrl: string;
-  fileName: string;
-}
+const researchIcons: Record<string, typeof DirectivesIcon> = {
+  directives: DirectivesIcon,
+  amendments: AmendmentTrackerIcon,
+  "regulatory-updates": RegulatoryUpdatesIcon,
+};
 
-interface ResearchSection {
-  id: string;
-  name: string;
-  icon: typeof DirectivesIcon;
-  description: string;
-  searchPlaceholder: string;
-  categories: readonly string[];
-  items: readonly ResearchSourceItem[];
-}
+function getPublishedResearchItem(
+  document: PublishedDocument,
+  sectionId: string,
+): ResearchSourceItem | undefined {
+  const { documentType, title, fiscalYear } = document;
+  const amendment =
+    (documentType === "Act" ||
+      documentType === "Rule" ||
+      documentType === "Rajpatra") &&
+    (isFinanceLegislation(title) ||
+      /\bamend(?:ment|ing)s?\b|संशोधन/iu.test(title));
+  let category: string;
+  if (sectionId === "amendments" && amendment) {
+    category = `FY ${fiscalYear}`;
+  } else if (
+    sectionId === "directives" &&
+    (documentType === "Directive" ||
+      documentType === "Circular" ||
+      documentType === "Rule" ||
+      documentType === "Advisory Note")
+  ) {
+    category =
+      documentType === "Rule" ? "Rules & Compliance" : "Published Guidance";
+  } else if (
+    sectionId === "regulatory-updates" &&
+    (documentType === "Rajpatra" || documentType === "Precedent")
+  ) {
+    category = "Statutory Texts";
+  } else {
+    return undefined;
+  }
 
-const research: readonly ResearchSection[] = [
-  {
-    id: "directives",
-    name: "Directives & Circulars",
-    icon: DirectivesIcon,
-    description:
-      "Browse verified IRD guidance, subordinate rules, and policy source files stored in the repository.",
-    searchPlaceholder: "Search guidance…",
-    categories: [
-      "All Guidance",
-      "Withholding Guidance",
-      "Rules & Compliance",
-      "Ministry Policies",
-    ],
-    items: [
-      {
-        title: "Income Tax Act, 2058 — Tax Deduction at Source (TDS)",
-        shortTitle: "TDS Procedural Guide",
-        subTitle: "Withholding Agent Reference",
-        category: "Withholding Guidance",
-        authority: "Inland Revenue Department, Lazimpat",
-        tag: "IRD Guidance",
-        provisions:
-          "Official IRD informational booklet covering TDS rates, withholding thresholds, and deposit obligations under Chapter 17.",
-        status: "Verified Source PDF",
-        sourceUrl: "/api/sources/tds-guide-2058",
-        fileName: "Nepal_TDS.pdf",
-      },
-      {
-        title: "Asset (Money) Laundering Prevention Rules, 2009",
-        shortTitle: "AML Prevention Rules",
-        subTitle: "Subordinate Regulatory Rules",
-        category: "Rules & Compliance",
-        authority: "Government of Nepal",
-        tag: "Rules",
-        provisions:
-          "English text of the Asset (Money) Laundering Prevention Rules, 2009 governing customer due diligence and reporting compliance.",
-        status: "Verified Source PDF",
-        sourceUrl: "/api/sources/aml-rules-2009",
-        fileName: "Nepal_AML_Rules_2009_English.pdf",
-      },
-      {
-        title: "Development Cooperation Policy, 2014",
-        shortTitle: "Development Cooperation Policy",
-        subTitle: "Ministry of Finance Framework",
-        category: "Ministry Policies",
-        authority: "Ministry of Finance, Nepal",
-        tag: "Policy",
-        provisions:
-          "Official English translation of Nepal's Development Cooperation Policy governing international grants, projects, and tax terms.",
-        status: "Verified Source PDF",
-        sourceUrl: "/api/sources/development-cooperation-policy-2014",
-        fileName: "Nepal_DevelcoopNepal.pdf",
-      },
-    ],
-  },
-  {
-    id: "amendments",
-    name: "Amendment Tracker",
-    icon: AmendmentTrackerIcon,
-    description:
-      "Inspect verified statutory amendments from Finance Bill, 2083 alongside consolidated base Acts.",
-    searchPlaceholder:
-      "Filter amendments by fiscal year (e.g. 2083/84) or statute…",
-    categories: [
-      "All Fiscal Years",
-      "FY 2083/84 (Finance Bill 2083)",
-      "Consolidated Base Acts",
-    ],
-    items: [
-      {
-        title: "Finance Bill, 2083 — Income Tax Act, 2058 Amendments (Sec. 57)",
-        shortTitle: "Income Tax Amendments 2083",
-        subTitle: "APA, International Transactions & VC/PE",
-        category: "FY 2083/84 (Finance Bill 2083)",
-        authority: "Federal Parliament Secretariat / Ministry of Finance",
-        tag: "FY 2083/84 Amendment",
-        provisions:
-          "Adds international transaction definition (Sec. 2(kha1)), Advance Pricing Agreements (Sec. 33B), VC/PE exemption (Sec. 10(tha1)), and Sec. 95Ka rules.",
-        sourceUrl: "/api/sources/finance-bill-2083-pdf",
-        fileName: "finance-bill-2083-84-original.pdf",
-      },
-      {
-        title:
-          "Finance Bill, 2083 — VAT Act & Excise Duty Act Amendments (Sec. 55–56)",
-        shortTitle: "VAT & Excise Amendments 2083",
-        subTitle: "Multi-Rate VAT, Liquor & Micro-Brewery Rules",
-        category: "FY 2083/84 (Finance Bill 2083)",
-        authority: "Federal Parliament Secretariat / Ministry of Finance",
-        tag: "FY 2083/84 Amendment",
-        provisions:
-          "Authorizes Gazetted concessional VAT rates (Sec. 7(1a)), updates liquor definition (Sec. 2(n1)), micro-brewery licensing, and excise suspension renewals.",
-        sourceUrl: "/api/sources/finance-bill-2083-pdf",
-        fileName: "finance-bill-2083-84-original.pdf",
-      },
-      {
-        title:
-          "Finance Bill, 2083 — Customs Duty & Customs Act Amendments (Sec. 58–59)",
-        shortTitle: "Customs Amendments 2083",
-        subTitle: "Sec. 28A Review & Annex 4 Baggage Schedule",
-        category: "FY 2083/84 (Finance Bill 2083)",
-        authority: "Department of Customs / Ministry of Finance",
-        tag: "FY 2083/84 Amendment",
-        provisions:
-          "Establishes administrative review under Sec. 28A of Customs Duty Act, 2081, amends Customs Act, 2082, and updates Annex 4 Baggage Rules.",
-        sourceUrl: "/api/sources/finance-bill-2083-pdf",
-        fileName: "finance-bill-2083-84-original.pdf",
-      },
-      {
-        title: "Income Tax Act, 2058 & VAT Act, 2052 Consolidations",
-        shortTitle: "Base Statutory Acts",
-        subTitle: "Primary Direct & Indirect Tax Texts",
-        category: "Consolidated Base Acts",
-        authority: "Nepal Law Commission / IRD",
-        tag: "Consolidated Statute",
-        provisions:
-          "Baseline English consolidations of Income Tax Act, 2058 (176 pages) and Value Added Tax Act, 2052 (42 pages).",
-        status: "Verified Source PDF",
-        sourceUrl: "/api/sources/income-tax-act-2058",
-        fileName: "Nepal_inctax.pdf",
-      },
-    ],
-  },
-  {
-    id: "regulatory-updates",
-    name: "Regulatory updates",
-    icon: RegulatoryUpdatesIcon,
-    description:
-      "Review verified statutory schemes, special levies, and amnesty provisions backed by repository source files.",
-    searchPlaceholder:
-      "Search verified amnesties, levies, and statutory files…",
-    categories: [
-      "All Updates",
-      "Tax Amnesties",
-      "Fees & Levies",
-      "Statutory Texts",
-    ],
-    items: [
-      {
-        title:
-          "Finance Bill, 2083 — Tax Amnesties & Arrears Waivers (Sec. 30–44)",
-        shortTitle: "FY 2083/84 Amnesty Schemes",
-        subTitle: "Legacy Taxes, 1% Arrears & 3-Tier Waivers",
-        category: "Tax Amnesties",
-        authority: "Inland Revenue Department / Ministry of Finance",
-        tag: "Verified Relief Scheme",
-        provisions:
-          "Covers legacy tax write-offs (Sec. 30), post-clearance customs relief (Sec. 34), 3-tier income tax amnesty (Sec. 40), and 1% arrears settlement (Sec. 44).",
-        sourceUrl: "/api/sources/finance-bill-2083-pdf",
-        fileName: "finance-bill-2083-84-original.pdf",
-      },
-      {
-        title: "Finance Bill, 2083 — Special Fees, Levies & DST (Sec. 5–22)",
-        shortTitle: "Special Fees & Digital Levies",
-        subTitle: "Foreign Employment, Tourism, Green Tax & Telecom",
-        category: "Fees & Levies",
-        authority: "Ministry of Finance",
-        tag: "Statutory Levy Schedule",
-        provisions:
-          "Details 1% Foreign Employment Fee, Tourism Service Fee, Green Tax, Telecom Service Charge, Luxury Tax, and Digital Service Tax provisions.",
-        sourceUrl: "/api/sources/finance-bill-2083-pdf",
-        fileName: "finance-bill-2083-84-original.pdf",
-      },
-      {
-        title: "The Companies Act, 2063 (2006) — English Consolidation",
-        shortTitle: "Companies Act, 2063",
-        subTitle: "Corporate Governance & Audits",
-        category: "Statutory Texts",
-        authority: "Nepal Law Commission / Office of Company Registrar",
-        tag: "Corporate Statute",
-        provisions:
-          "198-page consolidated statutory text governing corporate registration, capital structure, financial audits, and compliance.",
-        status: "Verified Source PDF",
-        sourceUrl: "/api/sources/companies-act-2063",
-        fileName: "Nepal_Companies.pdf",
-      },
-    ],
-  },
-];
+  return {
+    title,
+    shortTitle: title,
+    subTitle: `FY ${fiscalYear}`,
+    category,
+    authority: document.issuingAuthority,
+    tag: documentType,
+    provisions: document.summary ?? "",
+    sourceLabel:
+      document.mimeType === "application/pdf" ? "View PDF" : "Open document",
+    sourceUrl: document.fileUrl,
+    fileName: document.fileName,
+  };
+}
 
 function renderFormattedUserMessage(text: string) {
   const parts = text.split(/(@[a-zA-Z0-9_\u0900-\u097F]+)/g);
@@ -331,7 +191,65 @@ export default function Dashboard() {
   const messageEnd = useRef<HTMLDivElement>(null);
   const focusComposer = useRef(false);
   const activeRequestRef = useRef<string | null>(null);
-  const section = research.find(({ id }) => id === current);
+  const section = RESEARCH_SECTIONS.find(({ id }) => id === current);
+  const { documents: publishedDocuments, managedCatalog } =
+    usePublishedDocuments(Boolean(section));
+  const SectionIcon = section ? researchIcons[section.id] : undefined;
+  const resourceItems = section
+    ? [
+        ...publishedDocuments.flatMap((document) => {
+          const curated = section.items.find(
+            (item) =>
+              item.title === document.title &&
+              (item.sourceUrl === document.fileUrl ||
+                item.fileName === document.fileName),
+          );
+          if (curated) {
+            return managedCatalog
+              ? [
+                  {
+                    ...curated,
+                    sourceUrl: document.fileUrl,
+                    authority: document.issuingAuthority,
+                    provisions: document.summary ?? "",
+                  },
+                ]
+              : [];
+          }
+          const isCuratedElsewhere = RESEARCH_SECTIONS.some((candidate) =>
+            candidate.items.some(
+              (item) =>
+                item.title === document.title &&
+                (item.sourceUrl === document.fileUrl ||
+                  item.fileName === document.fileName),
+            ),
+          );
+          const isBundledSource =
+            TAX_LIBRARY_DOCUMENTS.some(
+              (item) =>
+                item.title === document.title &&
+                (item.sourceUrl === document.fileUrl ||
+                  item.authorityDomain === document.fileName),
+            ) ||
+            (!managedCatalog &&
+              section.items.some(
+                (item) => item.sourceUrl === document.fileUrl,
+              ));
+          if (isCuratedElsewhere || isBundledSource) return [];
+          const item = getPublishedResearchItem(document, section.id);
+          return item ? [item] : [];
+        }),
+        ...(managedCatalog ? [] : section.items),
+      ]
+    : [];
+  const resourceCategories = section
+    ? [
+        ...new Set([
+          ...section.categories,
+          ...resourceItems.map((item) => item.category),
+        ]),
+      ]
+    : [];
 
   const activeSession =
     sessions.find((s) => s.id === activeSessionId) ?? sessions[0] ?? null;
@@ -421,7 +339,9 @@ export default function Dashboard() {
     function syncSection() {
       const destination = window.location.hash.slice(1);
       if (destination === "main") return;
-      const knownSection = research.find(({ id }) => id === destination);
+      const knownSection = RESEARCH_SECTIONS.find(
+        ({ id }) => id === destination,
+      );
       setCurrent(knownSection?.id ?? assistant.id);
       setSectionFilter(knownSection?.categories[0] ?? "All");
       setSectionSearch("");
@@ -784,6 +704,7 @@ export default function Dashboard() {
 
     activeIntervals.current.push(thinkingInterval);
 
+    let usedPublishedSearch = false;
     const startResponseStreaming = () => {
       clearInterval(thinkingInterval);
       const totalElapsedSec = Number(
@@ -808,10 +729,21 @@ export default function Dashboard() {
                         resources: matched.resources,
                         contributor: matched.contributor,
                         rateTable: matched.rateTable,
+                        ...(usedPublishedSearch && {
+                          followUps: [],
+                          researchAudit: undefined,
+                          taskList: undefined,
+                          responseType: undefined,
+                        }),
                         isLiveThinking: false,
                         thoughtCollapsed: true,
                         thoughtProcess: {
-                          ...initialThoughtProcess,
+                          ...(usedPublishedSearch
+                            ? {
+                                summary: "Searched published Q&A.",
+                                steps: [],
+                              }
+                            : initialThoughtProcess),
                           duration: durationLabel,
                         },
                         stepDurations: [...recordedStepDurations],
@@ -884,54 +816,68 @@ export default function Dashboard() {
     const requestId = generateId();
     activeRequestRef.current = requestId;
 
-    if (matched.id === "out-of-scope-query") {
-      const searchElapsedSec = Number(
-        ((performance.now() - currentStepStartMs) / 1000).toFixed(2),
-      );
-      recordedStepDurations.push(searchElapsedSec);
-      for (let idx = searchStepIndex + 1; idx < stepCount; idx++) {
-        currentStep = idx;
-        recordedStepDurations.push(0);
-      }
-      startResponseStreaming();
-      return;
-    }
-
+    const query = (cleanQuery || text).trim();
     // Check dynamic repository for verified CA entries in real time
     fetch("/api/qa/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: cleanQuery || text, lang: effectiveLang }),
+      body: JSON.stringify({ query, lang: effectiveLang }),
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (activeRequestRef.current !== requestId) return;
-        if (data?.results && data.results.length > 0) {
-          const topMatch: TaxQAEntry = data.results[0];
-          if (topMatch.answer) {
-            matched.answer = topMatch.answer;
-            if (topMatch.contributor && !topMatch.isAnonymous) {
-              matched.contributor = {
+        const results: TaxQAEntry[] = data?.results ?? [];
+        // The repository also returns broad keyword matches. Require an exact
+        // question or topic when the local matcher found no tax context.
+        const normalize = (value: string) =>
+          value
+            .toLowerCase()
+            .trim()
+            .replace(/[?.!]+$/u, "")
+            .replace(/\s+/gu, " ");
+        const normalizedQuery = normalize(query);
+        const exactMatch = results.find((entry) =>
+          [entry.question, entry.shortTopic].some(
+            (value) => normalize(value) === normalizedQuery,
+          ),
+        );
+        const exactBundledMatch =
+          matched.id !== "out-of-scope-query" &&
+          [matched.question, matched.shortTopic].some(
+            (value) => normalize(value) === normalizedQuery,
+          );
+        const topMatch =
+          exactMatch ??
+          (matched.id !== "out-of-scope-query" && !exactBundledMatch
+            ? results[0]
+            : undefined);
+        if (!topMatch?.answer) return;
+
+        usedPublishedSearch = true;
+        matched.answer = topMatch.answer;
+        matched.contributor =
+          topMatch.contributor && !topMatch.isAnonymous
+            ? {
                 fullName: topMatch.contributor.fullName,
                 icanNumber: topMatch.contributor.icanNumber,
                 firmName: topMatch.contributor.firmName,
                 isVerifiedCa: topMatch.contributor.isVerifiedCa,
-              };
-            }
-            if (topMatch.citations && topMatch.citations.length > 0) {
-              matched.resources = topMatch.citations.map((c) => ({
-                title: c.title,
-                citation: c.citation,
-                authority: c.authority,
-                externalUrl: c.url,
-                libraryId: c.libraryId,
-              }));
-            }
-            if (topMatch.rateTable) {
-              matched.rateTable = topMatch.rateTable;
-            }
-          }
-        }
+              }
+            : undefined;
+        matched.resources = (topMatch.citations ?? [])
+          .filter(
+            (citation) =>
+              typeof citation?.title === "string" &&
+              typeof citation.citation === "string",
+          )
+          .map((citation) => ({
+            title: citation.title,
+            citation: citation.citation,
+            authority: citation.authority,
+            externalUrl: citation.url,
+            libraryId: citation.libraryId,
+          }));
+        matched.rateTable = topMatch.rateTable;
       })
       .catch(() => {
         // Fallback silently to initial matched answer
@@ -1005,7 +951,7 @@ export default function Dashboard() {
             return;
           }
           setCurrent(id);
-          const nextSection = research.find((s) => s.id === id);
+          const nextSection = RESEARCH_SECTIONS.find((s) => s.id === id);
           if (nextSection) {
             setSectionFilter(nextSection.categories[0] ?? "All");
             setSectionSearch("");
@@ -1092,7 +1038,7 @@ export default function Dashboard() {
             <VoiceWaveVisualizer voiceLevel={voiceLevel} />
           )}
         </AnimatePresence>
-        {section ? (
+        {section && SectionIcon ? (
           <section
             className={styles.resource}
             aria-labelledby="workspace-title"
@@ -1108,7 +1054,7 @@ export default function Dashboard() {
                 <span>Back to CA Ora</span>
               </button>
               <div className={styles.resourceTitleGroup}>
-                <section.icon
+                <SectionIcon
                   className={styles.resourceBadgeIcon}
                   aria-hidden="true"
                 />
@@ -1136,7 +1082,7 @@ export default function Dashboard() {
                 role="tablist"
                 aria-label="Categories"
               >
-                {section.categories.map((cat) => (
+                {resourceCategories.map((cat) => (
                   <button
                     key={cat}
                     type="button"
@@ -1153,7 +1099,7 @@ export default function Dashboard() {
             </div>
 
             <div className={styles.resourceGrid}>
-              {section.items
+              {resourceItems
                 .filter((item) => {
                   const isAllCategory =
                     sectionFilter === "All" ||
@@ -1172,7 +1118,10 @@ export default function Dashboard() {
                   return matchesCat && matchesQuery;
                 })
                 .map((item) => (
-                  <article key={item.title} className={styles.resourceCard}>
+                  <article
+                    key={`${item.sourceUrl}-${item.title}`}
+                    className={styles.resourceCard}
+                  >
                     <div className={styles.cardHeader}>
                       <span className={styles.cardTag}>{item.tag}</span>
                       {item.status && (
@@ -1187,7 +1136,9 @@ export default function Dashboard() {
                     </div>
                     <h2 className={styles.cardTitle}>{item.title}</h2>
                     <p className={styles.cardSubTitle}>{item.subTitle}</p>
-                    <p className={styles.cardProvisions}>{item.provisions}</p>
+                    {item.provisions && (
+                      <p className={styles.cardProvisions}>{item.provisions}</p>
+                    )}
                     <div className={styles.cardFooter}>
                       <p className={styles.cardAuthority}>{item.authority}</p>
                       <div className={styles.cardActions}>
@@ -1198,7 +1149,7 @@ export default function Dashboard() {
                           className={styles.cardAction}
                         >
                           <FileText aria-hidden="true" />
-                          <span>View PDF</span>
+                          <span>{item.sourceLabel ?? "View PDF"}</span>
                         </a>
                         <button
                           type="button"
