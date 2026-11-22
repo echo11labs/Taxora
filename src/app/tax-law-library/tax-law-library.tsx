@@ -19,6 +19,11 @@ import {
   loadStoredSessions,
   summarizeSession,
 } from "@/lib/chat-sessions";
+import {
+  isFinanceLegislation,
+  usePublishedDocuments,
+} from "@/lib/published-documents";
+import { RESEARCH_SECTIONS } from "@/lib/research-catalog";
 import { type LawDocument, TAX_LIBRARY_DOCUMENTS } from "@/lib/tax-law-catalog";
 import styles from "./tax-law-library.module.css";
 
@@ -32,6 +37,13 @@ const CATEGORIES = [
   "Directives",
   "Policies",
 ] as const;
+
+const libraryCategories: Record<string, LawDocument["category"]> = {
+  Act: "Acts",
+  Rule: "Rules",
+  Directive: "Directives",
+  Circular: "Directives",
+};
 
 function FluidRibbonArtwork({ variant }: { variant: number }) {
   if (variant === 0) {
@@ -228,6 +240,8 @@ function FluidRibbonArtwork({ variant }: { variant: number }) {
 
 export function TaxLawLibrary() {
   const [search, setSearch] = useState("");
+  const { documents: publishedDocuments, managedCatalog } =
+    usePublishedDocuments();
   const [selectedCategory, setSelectedCategory] =
     useState<string>("All Documents");
   const [collapsed, setCollapsed] = useState(false);
@@ -270,7 +284,69 @@ export function TaxLawLibrary() {
   }, [isSearchOpen]);
 
   const filteredDocs = useMemo(() => {
-    return TAX_LIBRARY_DOCUMENTS.filter((item) => {
+    const published = publishedDocuments.flatMap((document): LawDocument[] => {
+      const curated = TAX_LIBRARY_DOCUMENTS.find(
+        (item) =>
+          item.title === document.title &&
+          (item.sourceUrl === document.fileUrl ||
+            item.authorityDomain === document.fileName),
+      );
+      if (curated) {
+        return managedCatalog
+          ? [
+              {
+                ...curated,
+                sourceUrl: document.fileUrl,
+                authority: document.issuingAuthority,
+                description: document.summary ?? "",
+              },
+            ]
+          : [];
+      }
+      // Research summaries may share a PDF with a full library source.
+      const researchSummary = RESEARCH_SECTIONS.some((section) =>
+        section.items.some(
+          (item) =>
+            item.title === document.title &&
+            (item.sourceUrl === document.fileUrl ||
+              item.fileName === document.fileName),
+        ),
+      );
+      const isBundledFallback =
+        !managedCatalog &&
+        TAX_LIBRARY_DOCUMENTS.some(
+          (item) =>
+            item.sourceUrl === document.fileUrl ||
+            item.authorityDomain === document.fileName,
+        );
+      if (researchSummary || isBundledFallback) return [];
+
+      return [
+        {
+          id: document.id,
+          title: document.title,
+          shortTitle: document.title,
+          monogram: "",
+          category: isFinanceLegislation(document.title)
+            ? "Finance Acts"
+            : (libraryCategories[document.documentType] ?? "Policies"),
+          tag: document.documentType,
+          authority: document.issuingAuthority,
+          authorityDomain: "",
+          sourceUrl: document.fileUrl,
+          description: document.summary ?? "",
+          sectionsCount: "",
+          chaptersCount: "",
+          enactmentDate: `FY ${document.fiscalYear}`,
+          variant: 1,
+        },
+      ];
+    });
+
+    return [
+      ...published,
+      ...(managedCatalog ? [] : TAX_LIBRARY_DOCUMENTS),
+    ].filter((item) => {
       const matchCategory =
         selectedCategory === "All Documents" ||
         item.category === selectedCategory;
@@ -289,7 +365,7 @@ export function TaxLawLibrary() {
 
       return matchCategory && matchSearch;
     });
-  }, [search, selectedCategory]);
+  }, [managedCatalog, publishedDocuments, search, selectedCategory]);
 
   return (
     <div className={styles.shell} data-collapsed={collapsed}>
@@ -568,27 +644,31 @@ export function TaxLawLibrary() {
 
                 {/* 2. Bottom Dark Chassis Section */}
                 <div className={styles.chassisContent}>
-                  <p className={styles.cardBio}>{item.description}</p>
+                  {item.description && (
+                    <p className={styles.cardBio}>{item.description}</p>
+                  )}
 
-                  <div className={styles.statsRow}>
-                    <div className={styles.statItem}>
-                      <span className={styles.statValue}>
-                        {item.sectionsCount.split(" ")[0]}
-                      </span>
-                      <span className={styles.statLabel}>
-                        {item.sectionsCount.split(" ").slice(1).join(" ")}
-                      </span>
-                    </div>
+                  {(item.sectionsCount || item.chaptersCount) && (
+                    <div className={styles.statsRow}>
+                      <div className={styles.statItem}>
+                        <span className={styles.statValue}>
+                          {item.sectionsCount.split(" ")[0]}
+                        </span>
+                        <span className={styles.statLabel}>
+                          {item.sectionsCount.split(" ").slice(1).join(" ")}
+                        </span>
+                      </div>
 
-                    <div className={styles.statItem}>
-                      <span className={styles.statValue}>
-                        {item.chaptersCount.split(" ")[0]}
-                      </span>
-                      <span className={styles.statLabel}>
-                        {item.chaptersCount.split(" ").slice(1).join(" ")}
-                      </span>
+                      <div className={styles.statItem}>
+                        <span className={styles.statValue}>
+                          {item.chaptersCount.split(" ")[0]}
+                        </span>
+                        <span className={styles.statLabel}>
+                          {item.chaptersCount.split(" ").slice(1).join(" ")}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <a
                     href={item.sourceUrl}
@@ -600,7 +680,7 @@ export function TaxLawLibrary() {
                       className={styles.authorityLinkIcon}
                       aria-hidden="true"
                     />
-                    <span>{`Source File • ${item.authorityDomain}`}</span>
+                    <span>Open source document</span>
                   </a>
                 </div>
               </article>

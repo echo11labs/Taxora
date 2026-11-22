@@ -541,11 +541,17 @@ class SupabaseTaxRepository implements TaxKnowledgeRepository {
       dbQuery = dbQuery.eq("category", category);
     }
 
-    const { data, error } = await dbQuery.limit(200);
-    if (error || !data || data.length === 0) {
-      // Fallback to local search if remote query produces empty result
-      const local = new LocalTaxRepository();
-      return local.searchQA(query, lang, category);
+    const data = [];
+    const pageSize = 200;
+    dbQuery = dbQuery.order("id");
+    for (let offset = 0; ; offset += pageSize) {
+      const { data: page, error } = await dbQuery.range(
+        offset,
+        offset + pageSize - 1,
+      );
+      if (error || !page) throw new Error("Unable to load published Q&A.");
+      data.push(...page);
+      if (page.length < pageSize || !query.trim()) break;
     }
 
     const mapped: TaxQAEntry[] = data.map((row) => ({
@@ -581,14 +587,7 @@ class SupabaseTaxRepository implements TaxKnowledgeRepository {
       return mapped.slice(0, 10);
     }
 
-    const matches = scoreQaCandidates(mapped, query);
-    if (matches.length > 0) {
-      return matches.slice(0, 10);
-    }
-
-    // If Supabase only holds partial modules (e.g. Finance Bill 2083), fall back to local verified base
-    const local = new LocalTaxRepository();
-    return local.searchQA(query, lang, category);
+    return scoreQaCandidates(mapped, query).slice(0, 10);
   }
 
   private async resolveContributorId(
@@ -748,12 +747,9 @@ class SupabaseTaxRepository implements TaxKnowledgeRepository {
     }
 
     const { data, error } = await query;
-    if (error || !data || data.length === 0) {
-      const local = new LocalTaxRepository();
-      return local.listDocuments(filter);
-    }
+    if (error) throw new Error("Unable to load documents.");
 
-    return data.map((row) => ({
+    return (data ?? []).map((row) => ({
       id: row.id,
       title: row.title,
       documentType: row.document_type,
